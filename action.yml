@@ -1,0 +1,201 @@
+name: "GHA GitHub Service Proof"
+description: "Check GitHub Actions service/API compatibility with offline receipts: REST permissions, gh CLI, OIDC, and gh-log replay."
+author: "Wildmason"
+branding:
+  icon: "shield"
+  color: "gray-dark"
+inputs:
+  version:
+    description: "Crate version to install, or latest."
+    required: false
+    default: "latest"
+  command:
+    description: "Command to run. Use check-workflow, permissions, call, oidc, or gh-log."
+    required: false
+    default: "check-workflow"
+  repo:
+    description: "Repository root for check-workflow."
+    required: false
+    default: "."
+  workflow:
+    description: "Newline-separated workflow paths for check-workflow, or single workflow path for permissions."
+    required: false
+  job:
+    description: "Job id for permissions mode."
+    required: false
+  method:
+    description: "HTTP method for call mode."
+    required: false
+  path:
+    description: "Request path for call mode."
+    required: false
+  url:
+    description: "Original URL for call mode (optional)."
+    required: false
+  origin:
+    description: "Origin label for call mode (optional)."
+    required: false
+  permissions:
+    description: "Inline JSON permissions object or shorthand (read-all / write-all)."
+    required: false
+  permissions-file:
+    description: "Path to a JSON file with the permissions block."
+    required: false
+  audience:
+    description: "OIDC audience for oidc mode."
+    required: false
+  repository:
+    description: "owner/repo for oidc mode."
+    required: false
+  ref:
+    description: "Git ref for oidc mode."
+    required: false
+  sha:
+    description: "Commit SHA for oidc mode."
+    required: false
+  workflow-name:
+    description: "Workflow file name for oidc mode (e.g. release.yml)."
+    required: false
+  oidc-job:
+    description: "Job id for oidc mode."
+    required: false
+  run-id:
+    description: "Run id for oidc mode."
+    required: false
+  job-workflow-ref:
+    description: "Optional job_workflow_ref claim for oidc mode."
+    required: false
+  ttl-seconds:
+    description: "OIDC token TTL in seconds."
+    required: false
+  claim:
+    description: "Newline-separated NAME=JSON extra claims for oidc mode."
+    required: false
+  log:
+    description: "Path to a canonical gh-log JSON bundle for gh-log mode."
+    required: false
+  unsafe-full-payloads:
+    description: "Disable redaction-by-schema-contract for gh-log mode. Use only for local debugging."
+    required: false
+    default: "false"
+  format:
+    description: "Receipt format: text, json, or markdown."
+    required: false
+    default: "text"
+  output:
+    description: "Optional receipt output path."
+    required: false
+  strict:
+    description: "Treat warnings as failures."
+    required: false
+    default: "false"
+runs:
+  using: "composite"
+  steps:
+    - name: "Install gha-github-service-proof"
+      shell: "bash"
+      run: |
+        if command -v gha-github-service-proof >/dev/null 2>&1; then
+          exit 0
+        fi
+
+        if [ "${PROOF_VERSION}" = "latest" ]; then
+          cargo install gha-github-service-proof --locked
+        else
+          cargo install gha-github-service-proof --version "${PROOF_VERSION}" --locked
+        fi
+      env:
+        PROOF_VERSION: ${{ inputs.version }}
+    - name: "Run gha-github-service-proof"
+      shell: "bash"
+      run: |
+        set -euo pipefail
+
+        args=("$PROOF_COMMAND")
+
+        append_if_set() {
+          local flag="$1"
+          local value="$2"
+          if [ -n "$value" ]; then
+            args+=("$flag" "$value")
+          fi
+        }
+
+        append_lines() {
+          local flag="$1"
+          local value="$2"
+          while IFS= read -r line; do
+            if [ -n "$line" ]; then
+              args+=("$flag" "$line")
+            fi
+          done <<< "$value"
+        }
+
+        if [ "$PROOF_COMMAND" = "check-workflow" ]; then
+          args+=(--repo "$PROOF_REPO")
+          append_lines --workflow "$PROOF_WORKFLOW"
+        elif [ "$PROOF_COMMAND" = "permissions" ]; then
+          append_if_set --workflow "$PROOF_WORKFLOW"
+          append_if_set --job "$PROOF_JOB"
+        elif [ "$PROOF_COMMAND" = "call" ]; then
+          append_if_set --method "$PROOF_METHOD"
+          append_if_set --path "$PROOF_PATH"
+          append_if_set --url "$PROOF_URL"
+          append_if_set --origin "$PROOF_ORIGIN"
+          append_if_set --permissions "$PROOF_PERMISSIONS"
+          append_if_set --permissions-file "$PROOF_PERMISSIONS_FILE"
+        elif [ "$PROOF_COMMAND" = "oidc" ]; then
+          append_if_set --audience "$PROOF_AUDIENCE"
+          append_if_set --repository "$PROOF_REPOSITORY"
+          append_if_set --ref "$PROOF_REF"
+          append_if_set --sha "$PROOF_SHA"
+          append_if_set --workflow "$PROOF_WORKFLOW_NAME"
+          append_if_set --job "$PROOF_OIDC_JOB"
+          append_if_set --run-id "$PROOF_RUN_ID"
+          append_if_set --job-workflow-ref "$PROOF_JOB_WORKFLOW_REF"
+          append_if_set --ttl-seconds "$PROOF_TTL_SECONDS"
+          append_if_set --permissions "$PROOF_PERMISSIONS"
+          append_if_set --permissions-file "$PROOF_PERMISSIONS_FILE"
+          append_lines --claim "$PROOF_CLAIM"
+        elif [ "$PROOF_COMMAND" = "gh-log" ]; then
+          append_if_set --log "$PROOF_LOG"
+          append_if_set --permissions "$PROOF_PERMISSIONS"
+          append_if_set --permissions-file "$PROOF_PERMISSIONS_FILE"
+          if [ "$PROOF_UNSAFE_FULL_PAYLOADS" = "true" ]; then
+            args+=(--unsafe-full-payloads)
+          fi
+        fi
+
+        args+=(--format "$PROOF_FORMAT")
+        append_if_set --output "$PROOF_OUTPUT"
+        if [ "$PROOF_STRICT" = "true" ]; then
+          args+=(--strict)
+        fi
+
+        gha-github-service-proof "${args[@]}"
+      env:
+        PROOF_COMMAND: ${{ inputs.command }}
+        PROOF_REPO: ${{ inputs.repo }}
+        PROOF_WORKFLOW: ${{ inputs.workflow }}
+        PROOF_JOB: ${{ inputs.job }}
+        PROOF_METHOD: ${{ inputs.method }}
+        PROOF_PATH: ${{ inputs.path }}
+        PROOF_URL: ${{ inputs.url }}
+        PROOF_ORIGIN: ${{ inputs.origin }}
+        PROOF_PERMISSIONS: ${{ inputs.permissions }}
+        PROOF_PERMISSIONS_FILE: ${{ inputs.permissions-file }}
+        PROOF_AUDIENCE: ${{ inputs.audience }}
+        PROOF_REPOSITORY: ${{ inputs.repository }}
+        PROOF_REF: ${{ inputs.ref }}
+        PROOF_SHA: ${{ inputs.sha }}
+        PROOF_WORKFLOW_NAME: ${{ inputs.workflow-name }}
+        PROOF_OIDC_JOB: ${{ inputs.oidc-job }}
+        PROOF_RUN_ID: ${{ inputs.run-id }}
+        PROOF_JOB_WORKFLOW_REF: ${{ inputs.job-workflow-ref }}
+        PROOF_TTL_SECONDS: ${{ inputs.ttl-seconds }}
+        PROOF_CLAIM: ${{ inputs.claim }}
+        PROOF_LOG: ${{ inputs.log }}
+        PROOF_UNSAFE_FULL_PAYLOADS: ${{ inputs.unsafe-full-payloads }}
+        PROOF_FORMAT: ${{ inputs.format }}
+        PROOF_OUTPUT: ${{ inputs.output }}
+        PROOF_STRICT: ${{ inputs.strict }}

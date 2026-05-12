@@ -1,0 +1,47 @@
+name: GitHub Service Smoke
+on:
+  push:
+    branches:
+      - main
+permissions:
+  contents: write
+  issues: write
+  statuses: write
+  id-token: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      statuses: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Create release with assets
+        run: gh release create v1.0.0 ./dist/binary.zip --notes "Release v1.0.0"
+      - name: Tag-style release publisher
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          files: ./dist/*
+      - name: Cloud OIDC exchange
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::000000000000:role/example
+          aws-region: us-east-1
+      - name: Post deploy comment
+        run: gh issue comment 42 --body "Deployed v1.0.0"
+      - name: Mark commit status
+        run: curl -X POST -H "Authorization:Bearer $GH_TOKEN" https://api.github.com/repos/wildmason/mortar/statuses/abc123 -d '{"state":"success","context":"deploy"}'
+  read_only:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Inspect run history
+        run: gh run list --limit 5
+      - name: Probe rate limit
+        run: gh api rate_limit

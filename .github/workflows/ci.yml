@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Format
+        run: cargo fmt --check
+      - name: Test
+        run: cargo test --locked
+      - name: Clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Docs
+        run: cargo doc --locked --no-deps
+      - name: Package
+        run: cargo package --locked
+      - name: Smoke check-workflow
+        run: cargo run --locked -- check-workflow --repo examples --workflow examples/workflows/github-service.yml --format json --output target/github-service-proof.json
+      - name: Check smoke receipt
+        run: jq -e '.summary.failed == 0 and (.workflows | length) == 1' target/github-service-proof.json

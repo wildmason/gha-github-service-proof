@@ -1,0 +1,22 @@
+name: Released Action Smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  action-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: wildmason/gha-github-service-proof@v1
+        with:
+          command: check-workflow
+          repo: examples
+          workflow: examples/workflows/github-service.yml
+          format: json
+          output: target/action-smoke.json
+      - name: Check receipt
+        run: jq -e '.summary.failed == 0 and (.workflows | length) == 1' target/action-smoke.json
