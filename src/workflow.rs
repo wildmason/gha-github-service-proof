@@ -703,11 +703,10 @@ fn detect_gh_api(tokens: &[String], location: &str) -> Vec<ApiDetection> {
             other if other.starts_with('-') => {
                 let _ = iter.next();
             }
-            other => {
-                if path.is_none() {
-                    path = Some(other.to_owned());
-                }
+            other if path.is_none() => {
+                path = Some(other.to_owned());
             }
+            _ => {}
         }
     }
 
@@ -755,10 +754,11 @@ fn detect_from_curl(tokens: &[String], location: &str) -> Vec<ApiDetection> {
             }
             "-s" | "-sS" | "--silent" | "-L" | "--location" | "-f" | "--fail" | "-i" | "-I"
             | "--head" | "--retry" => {}
-            other if other.starts_with("http://") || other.starts_with("https://") => {
-                if url.is_none() {
-                    url = Some(other.to_owned());
-                }
+            other
+                if (other.starts_with("http://") || other.starts_with("https://"))
+                    && url.is_none() =>
+            {
+                url = Some(other.to_owned());
             }
             other if other.starts_with('-') => {
                 // unknown flag with potential value; consume conservatively
