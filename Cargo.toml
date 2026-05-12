@@ -1,6 +1,6 @@
 [package]
 name = "gha-github-service-proof"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "GitHub Actions service/API compatibility checker for offline CI: GITHUB_TOKEN permissions, REST/GraphQL/gh CLI calls, OIDC, checks/statuses, releases, and issues"

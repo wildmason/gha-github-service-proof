@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 - 2026-05-12
+
+- Recognize `metadata: read` as a known implicit GitHub App installation token permission when supplied through the JSON entry points used by `call`, `gh-log`, and `oidc`. ci-forge models the effective installation-token permissions and passes `metadata: read` through; the oracle now accepts it without surfacing it as an unknown key.
+- Reject `metadata: write` and `metadata: none` from JSON inputs with explicit errors. Installation tokens always retain implicit `metadata: read` and cannot be granted `write` or revoked to `none`.
+- For workflow YAML, replace the generic `permissions.unknown_key` warning for `metadata` with a dedicated `permissions.metadata_not_configurable` fail. GitHub Actions `permissions:` syntax does not expose `metadata` as a configurable key.
+
 ## 1.0.0 - 2026-05-12
 
 - Initial release.

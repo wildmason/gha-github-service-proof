@@ -394,3 +394,158 @@ fn output_path_writes_receipt_to_file_and_suppresses_stdout() {
     assert_eq!(receipt["mode"], "call");
     assert_eq!(receipt["calls"][0]["classification"], "exact");
 }
+
+#[test]
+fn call_accepts_metadata_read_in_permissions_silently() {
+    let output = bin()
+        .args([
+            "call",
+            "--method",
+            "POST",
+            "--path",
+            "/repos/wildmason/mortar/releases",
+            "--permissions",
+            r#"{"contents":"write","metadata":"read"}"#,
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let receipt: Value = serde_json::from_slice(&output).unwrap();
+    let call = &receipt["calls"][0];
+    assert_eq!(call["classification"], "simulated");
+    assert_eq!(call["satisfied"], true);
+    let granted = &call["permissions"]["entries"];
+    assert_eq!(granted["contents"], "write");
+    assert_eq!(granted["metadata"], "read");
+    let unknown = &call["permissions"]["unknown_keys"];
+    if let Some(list) = unknown.as_array() {
+        assert!(
+            list.iter().all(|v| v.as_str() != Some("metadata")),
+            "metadata: read must not be flagged as unknown when supplied via JSON permissions"
+        );
+    }
+}
+
+#[test]
+fn call_rejects_metadata_write_in_permissions() {
+    let assertion = bin()
+        .args([
+            "call",
+            "--method",
+            "GET",
+            "--path",
+            "/rate_limit",
+            "--permissions",
+            r#"{"metadata":"write"}"#,
+            "--format",
+            "json",
+        ])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assertion.get_output().stderr).into_owned();
+    assert!(
+        stderr.contains("metadata"),
+        "expected metadata error on stderr, got: {stderr}"
+    );
+}
+
+#[test]
+fn gh_log_accepts_metadata_read_in_permissions() {
+    let temp = tempdir().unwrap();
+    let bundle_path = temp.path().join("bundle.json");
+    fs::write(
+        &bundle_path,
+        r#"{
+            "schema_version": 1,
+            "tool": {"name": "ci-forge", "version": "0.1.0"},
+            "calls": [
+                {
+                    "id": "call-1",
+                    "source": "gh",
+                    "method": "GET",
+                    "path": "/repos/wildmason/mortar",
+                    "request_headers": {"authorization": "<redacted>"}
+                }
+            ]
+        }"#,
+    )
+    .unwrap();
+
+    let output = bin()
+        .args([
+            "gh-log",
+            "--log",
+            bundle_path.to_str().unwrap(),
+            "--permissions",
+            r#"{"contents":"read","metadata":"read"}"#,
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let receipt: Value = serde_json::from_slice(&output).unwrap();
+    assert_eq!(receipt["gh_log"]["call_count"], 1);
+    let call = &receipt["gh_log"]["calls"][0];
+    assert_eq!(call["catalog_match"]["endpoint_id"], "repos.get");
+    assert_eq!(call["satisfied"], true);
+}
+
+#[test]
+fn check_workflow_flags_metadata_key_as_not_configurable() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    write_workflow(
+        &repo,
+        r#"
+name: ci
+on: push
+permissions:
+  contents: read
+  metadata: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+    );
+
+    let assertion = bin()
+        .args([
+            "check-workflow",
+            "--repo",
+            repo.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .failure();
+
+    let receipt: Value = serde_json::from_slice(&assertion.get_output().stdout).unwrap();
+    let checks = &receipt["workflows"][0]["checks"];
+    let ids: Vec<&str> = checks
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|c| c["id"].as_str())
+        .collect();
+    assert!(
+        ids.contains(&"permissions.metadata_not_configurable"),
+        "expected permissions.metadata_not_configurable in workflow checks, got: {ids:?}"
+    );
+    assert!(
+        !ids.contains(&"permissions.unknown_key"),
+        "permissions.unknown_key must not fire for the workflow-syntax `metadata` key; got: {ids:?}"
+    );
+}

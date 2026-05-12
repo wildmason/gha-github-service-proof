@@ -11,6 +11,13 @@ use crate::model::{
 const ALL_LEVELS_READ: &str = "read-all";
 const ALL_LEVELS_WRITE: &str = "write-all";
 
+/// `metadata` is granted implicitly on every GitHub App installation token at
+/// `read` level. It is not configurable via the workflow `permissions:` block:
+/// declaring it there is a workflow-syntax error. ci-forge models the effective
+/// installation-token permissions and passes `metadata: read` through this
+/// JSON entry point; we accept it silently there and reject it from YAML.
+const METADATA_KEY: &str = "metadata";
+
 pub fn parse_yaml_block(value: Option<&Yaml>) -> (Option<PermissionSet>, Vec<Check>) {
     let Some(value) = value else {
         return (None, Vec::new());
@@ -85,6 +92,15 @@ pub fn parse_yaml_block(value: Option<&Yaml>) -> (Option<PermissionSet>, Vec<Che
                     ));
                     continue;
                 };
+                if key == METADATA_KEY {
+                    set.unknown_keys.push(key.clone());
+                    checks.push(Check::fail(
+                        "permissions.metadata_not_configurable",
+                        "workflow `permissions:` syntax does not expose `metadata`; GitHub App installation tokens grant `metadata: read` implicitly. Remove this key.",
+                    ));
+                    set.entries.insert(key.clone(), level);
+                    continue;
+                }
                 if PermissionKey::parse(key).is_none() {
                     set.unknown_keys.push(key.clone());
                     checks.push(Check::warn(
@@ -152,6 +168,26 @@ pub fn parse_json_permissions(value: &Value) -> Result<PermissionSet> {
                 let Some(parsed) = PermissionLevel::parse(level_text) else {
                     bail!("permission '{key}': level '{level_text}' is not one of none|read|write");
                 };
+                if key == METADATA_KEY {
+                    match parsed {
+                        PermissionLevel::Read => {
+                            // Implicit installation permission; ci-forge passes this
+                            // through. Accept silently and skip the unknown-key path.
+                            set.entries.insert(key.clone(), parsed);
+                            continue;
+                        }
+                        PermissionLevel::Write => {
+                            bail!(
+                                "permission 'metadata': installation tokens grant `metadata: read` implicitly; `metadata: write` is not a valid GitHub installation permission"
+                            );
+                        }
+                        PermissionLevel::None => {
+                            bail!(
+                                "permission 'metadata': installation tokens always retain implicit `metadata: read`; `metadata: none` cannot be granted"
+                            );
+                        }
+                    }
+                }
                 if PermissionKey::parse(key).is_none() {
                     set.unknown_keys.push(key.clone());
                 }
@@ -340,5 +376,67 @@ mod tests {
         let set = parse_json_permissions(&value).unwrap();
         assert_eq!(set.level(PermissionKey::Contents), PermissionLevel::Write);
         assert_eq!(set.level(PermissionKey::IdToken), PermissionLevel::None);
+    }
+
+    #[test]
+    fn parse_json_permissions_metadata_read_is_accepted_silently() {
+        let value: Value =
+            serde_json::from_str(r#"{"contents":"read","metadata":"read"}"#).unwrap();
+        let set = parse_json_permissions(&value).unwrap();
+        assert_eq!(
+            set.entries.get("metadata").copied(),
+            Some(PermissionLevel::Read)
+        );
+        assert!(
+            set.unknown_keys.iter().all(|k| k != "metadata"),
+            "metadata: read must not be treated as an unknown permission key (entries: {:?}, unknown: {:?})",
+            set.entries,
+            set.unknown_keys
+        );
+    }
+
+    #[test]
+    fn parse_json_permissions_metadata_write_is_rejected() {
+        let value: Value = serde_json::from_str(r#"{"metadata":"write"}"#).unwrap();
+        let err = parse_json_permissions(&value).unwrap_err();
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("metadata") && message.contains("read"),
+            "expected explicit metadata read-only error, got: {message}"
+        );
+    }
+
+    #[test]
+    fn parse_json_permissions_metadata_none_is_rejected() {
+        let value: Value = serde_json::from_str(r#"{"metadata":"none"}"#).unwrap();
+        let err = parse_json_permissions(&value).unwrap_err();
+        let message = format!("{err:#}");
+        assert!(
+            message.contains("metadata") && message.contains("implicit"),
+            "expected explicit metadata-cannot-be-revoked error, got: {message}"
+        );
+    }
+
+    #[test]
+    fn parse_yaml_block_flags_metadata_as_not_configurable() {
+        let yaml: Yaml = from_str("metadata: read\n").unwrap();
+        let (set, checks) = parse_yaml_block(Some(&yaml));
+        let set = set.unwrap();
+        assert!(set.unknown_keys.iter().any(|k| k == "metadata"));
+        assert!(
+            checks
+                .iter()
+                .any(|c| c.id == "permissions.metadata_not_configurable"
+                    && matches!(c.status, crate::model::CheckStatus::Fail)),
+            "expected Fail-level permissions.metadata_not_configurable check, got: {:?}",
+            checks
+        );
+        // and the generic unknown_key path must NOT fire for metadata — the
+        // dedicated check id replaces it so consumers can detect this case.
+        assert!(
+            checks.iter().all(|c| c.id != "permissions.unknown_key"),
+            "permissions.unknown_key must not fire for metadata; got: {:?}",
+            checks
+        );
     }
 }
