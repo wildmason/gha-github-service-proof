@@ -352,6 +352,7 @@ fn detect_from_gh(tokens: &[String], location: &str) -> Vec<ApiDetection> {
 
     match positional[0] {
         "release" => detections.extend(detect_gh_release(&positional, location)),
+        "label" => detections.extend(detect_gh_label(&positional, location)),
         "issue" => detections.extend(detect_gh_issue(&positional, location)),
         "pr" => detections.extend(detect_gh_pr(&positional, location)),
         "run" => detections.extend(detect_gh_run(&positional, location)),
@@ -374,6 +375,36 @@ fn detect_from_gh(tokens: &[String], location: &str) -> Vec<ApiDetection> {
     }
 
     detections
+}
+
+fn detect_gh_label(positional: &[&str], location: &str) -> Vec<ApiDetection> {
+    let sub = positional.get(1).copied().unwrap_or("");
+    let label = |verb: &str| format!("gh label {verb} at {location}");
+    match sub {
+        "create" => vec![ApiDetection {
+            origin: ApiDetectionOrigin::GhCli,
+            label: label("create"),
+            method: "POST".to_owned(),
+            path: "/repos/{owner}/{repo}/labels".to_owned(),
+            classification: Compatibility::Simulated,
+            catalog_match: None,
+            satisfied: false,
+            missing_permissions: Vec::new(),
+            unsupported_reason: None,
+        }],
+        "list" => vec![ApiDetection {
+            origin: ApiDetectionOrigin::GhCli,
+            label: label("list"),
+            method: "GET".to_owned(),
+            path: "/repos/{owner}/{repo}/labels".to_owned(),
+            classification: Compatibility::Simulated,
+            catalog_match: None,
+            satisfied: false,
+            missing_permissions: Vec::new(),
+            unsupported_reason: None,
+        }],
+        _ => Vec::new(),
+    }
 }
 
 fn detect_gh_release(positional: &[&str], location: &str) -> Vec<ApiDetection> {

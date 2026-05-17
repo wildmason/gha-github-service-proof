@@ -319,6 +319,15 @@ pub const CATALOG: &[EndpointEntry] = &[
         classification: Compatibility::Simulated,
         side_effect: "List repo labels; ci-forge serves stub locally.",
     },
+    EndpointEntry {
+        id: "repo.labels.create",
+        method: "POST",
+        path_template: "/repos/{owner}/{repo}/labels",
+        category: "labels",
+        required: &[(PK::Issues, PL::Write)],
+        classification: Compatibility::Simulated,
+        side_effect: "Create repo label; ci-forge records deterministic local label metadata.",
+    },
     // -- pull requests --
     EndpointEntry {
         id: "pulls.list",

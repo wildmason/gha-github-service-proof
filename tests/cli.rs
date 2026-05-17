@@ -59,6 +59,54 @@ jobs:
 }
 
 #[test]
+fn check_workflow_detects_gh_label_create_with_issues_write() {
+    let temp = tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    write_workflow(
+        &repo,
+        r#"
+name: Reminder
+on: workflow_dispatch
+permissions:
+  contents: read
+  issues: write
+jobs:
+  reminder:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure labels
+        run: gh label create bis-annual-report --color 5319e7 --description "Annual BIS reminder"
+"#,
+    );
+
+    let output = bin()
+        .args([
+            "check-workflow",
+            "--repo",
+            repo.to_str().unwrap(),
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let receipt: Value = serde_json::from_slice(&output).unwrap();
+    let detections = &receipt["workflows"][0]["jobs"][0]["steps"][0]["detections"];
+    assert_eq!(detections.as_array().unwrap().len(), 1);
+    assert_eq!(
+        detections[0]["catalog_match"]["endpoint_id"],
+        "repo.labels.create"
+    );
+    assert_eq!(detections[0]["classification"], "simulated");
+    assert_eq!(detections[0]["satisfied"], true);
+    assert_eq!(receipt["summary"]["failed"], 0);
+}
+
+#[test]
 fn check_workflow_fails_when_release_needs_write_but_block_grants_read() {
     let temp = tempdir().unwrap();
     let repo = temp.path().join("repo");
@@ -166,6 +214,33 @@ fn call_command_classifies_release_create_as_simulated_with_write() {
     let call = &receipt["calls"][0];
     assert_eq!(call["classification"], "simulated");
     assert_eq!(call["catalog_match"]["endpoint_id"], "releases.create");
+    assert_eq!(call["satisfied"], true);
+}
+
+#[test]
+fn call_command_classifies_label_create_as_simulated_with_issues_write() {
+    let output = bin()
+        .args([
+            "call",
+            "--method",
+            "POST",
+            "--path",
+            "/repos/wildmason/mortar/labels",
+            "--permissions",
+            r#"{"issues":"write"}"#,
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let receipt: Value = serde_json::from_slice(&output).unwrap();
+    let call = &receipt["calls"][0];
+    assert_eq!(call["classification"], "simulated");
+    assert_eq!(call["catalog_match"]["endpoint_id"], "repo.labels.create");
     assert_eq!(call["satisfied"], true);
 }
 
